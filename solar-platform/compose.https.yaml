@@ -1,0 +1,22 @@
+services:
+  caddy:
+    image: ${SOLAR_CADDY_IMAGE:-caddy:2-alpine}
+    restart: unless-stopped
+    depends_on:
+      solar:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SOLAR_DOMAIN: ${SOLAR_DOMAIN:?Configure your hostname first}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  caddy-data:
+  caddy-config:

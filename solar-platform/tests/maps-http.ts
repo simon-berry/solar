@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import {randomUUID,createHash} from "node:crypto";
+import {PDFDocument} from "pdf-lib";
+import {offsetLocation,tracedRoof} from "../shared/map-geometry";
+import {fillRoof,stableJSON} from "../shared/solar";
+import {modules} from "../shared/schema";
+const base=process.env.MAP_TEST_BASE||"http://127.0.0.1:5001";
+if(!["localhost","127.0.0.1"].includes(new URL(base).hostname))throw Error("Map smoke tests may only target a local disposable server.");
+const visitor=`maps-${randomUUID()}`;
+const req=(path:string,method="GET",body?:unknown,scope=visitor)=>fetch(base+path,{method,headers:{"x-visitor-id":scope,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
+let res=await req("/api/maps/config");assert.equal(res.status,200);assert.equal((await res.json()).satelliteConfigured,false);
+res=await req("/api/maps/search","POST",{query:"Chorley Town Hall"});assert.equal(res.status,422);
+res=await req("/api/projects","POST",{name:"Synthetic map HTTP QA",customer:"Synthetic only",address:"UK QA only",postcode:"PR7 1AA",nation:"England",type:"Commercial"});assert.equal(res.status,201);let p=await res.json();
+const initial=stableJSON(p.design),origin={lng:-2.633283,lat:53.6539642},d=structuredClone(p.design);
+d.mapLocation={...origin,label:"Synthetic mapped site",source:"manual",capturedAt:new Date().toISOString()};
+d.roofs=[tracedRoof([{x:0,y:0},{x:14,y:0},{x:14,y:-10},{x:8,y:-10},{x:8,y:-6},{x:0,y:-6}].map(q=>offsetLocation(origin,q)),35,d.roofs[0].id,"Synthetic polygon","traced-street")];
+d.roofs[0].panels=fillRoof(d.roofs[0],modules[0],d.gap,false,12);
+res=await req(`/api/projects/${p.id}`,"PUT",{expectedRevision:p.revision,design:d});assert.equal(res.status,200);p=await res.json();
+assert.deepEqual(p.design.roofs[0].boundary,d.roofs[0].boundary);assert.deepEqual(p.design.mapLocation,d.mapLocation);
+res=await req(`/api/projects/${p.id}/export/site.geojson`);assert.equal(res.status,200);assert.match(res.headers.get("content-disposition")||"",/attachment/);const geo=await res.json();
+assert.equal(geo.features.length,14);assert.equal(geo.revision,p.revision);assert.equal(geo.features[0].geometry.coordinates[0].length,7);assert.equal(geo.visitor,undefined);
+res=await req(`/api/projects/${p.id}/export/site.geojson`,"GET",undefined,"another-tenant");assert.equal(res.status,404);
+res=await req(`/api/projects/${p.id}/export/roof.svg`);assert.match(await res.text(),/<polygon/);
+res=await req(`/api/projects/${p.id}/export/project.json`);const portable=await res.json();
+res=await req("/api/projects/import","POST",portable);assert.equal(res.status,201);assert.deepEqual((await res.json()).design.roofs[0].geo,p.design.roofs[0].geo);
+res=await req(`/api/projects/${p.id}/technical-issues`,"POST",{expectedRevision:p.revision});assert.equal(res.status,201);const issue=await res.json();assert.equal(issue.template,"technical-review-v2");
+const expected=createHash("sha256").update(stableJSON({template:issue.template,snapshot:issue.snapshot,report:issue.report})).digest("hex");assert.equal(issue.hash,expected);
+res=await req(`/api/technical-issues/${issue.id}/pack.pdf`);assert.equal(res.status,200);assert.equal((await PDFDocument.load(await res.arrayBuffer())).getPageCount(),6);
+res=await req(`/api/technical-issues/${issue.id}/pack.pdf`,"GET",undefined,"another-tenant");assert.equal(res.status,404);
+const oldClient=structuredClone(p.design);delete oldClient.mapLocation;delete oldClient.roofs[0].boundary;delete oldClient.roofs[0].geo;oldClient.pricing.labour+=1;
+res=await req(`/api/projects/${p.id}`,"PUT",{expectedRevision:p.revision,design:oldClient});assert.equal(res.status,200);p=await res.json();assert.deepEqual(p.design.mapLocation,d.mapLocation);assert.deepEqual(p.design.roofs[0].boundary,d.roofs[0].boundary);
+res=await req(`/api/projects/${p.id}/restore`,"POST",{revision:1,expectedRevision:p.revision});assert.equal(res.status,200);p=await res.json();
+// Restore deliberately re-freezes authoritative hardware, but restores exact
+// historical geometry rather than merging newer map fields into the old roof.
+const {catalogueSnapshot:_hardware,...restored}=p.design;assert.equal(stableJSON(restored),initial);
+assert.equal(p.design.mapLocation,undefined);assert.equal(p.design.roofs[0].geo,undefined);assert.equal(p.design.roofs[0].boundary,undefined);
+res=await req(`/api/technical-issues/${issue.id}/report.json`);assert.equal((await res.json()).hash,issue.hash);
+console.log("Map HTTP checks passed: optional configuration/consent, polygon+pin persistence, scoped GeoJSON/SVG, import, v2 hash/A3 PDF, immutable issue, omitted-field preservation and exact historical restore.");

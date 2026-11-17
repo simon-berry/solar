@@ -1,0 +1,30 @@
+.map-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:18px;align-items:start}
+.map-consent-bar{display:flex;gap:22px;align-items:center;justify-content:space-between;border:1px solid #cddfce;border-radius:7px;background:#edf4eb;padding:16px 19px;margin-bottom:18px}.map-consent-bar strong{font-size:12px;color:#34573e}.map-consent-bar p{font-size:11px;line-height:1.65;color:#536a59;margin:6px 0 0;max-width:690px}.map-consent-bar>.button{flex:none}
+@media(max-width:760px){.map-consent-bar{align-items:stretch;flex-direction:column;gap:13px;padding:14px}.map-consent-bar>.button{align-self:flex-start}}
+.map-location-panel .content-body{padding:18px}.map-location-panel{min-width:0}.map-design-workspace .form-stack{gap:14px}
+.map-search-input{display:flex;align-items:center;border:1px solid #d8dfd9;border-radius:6px;padding-left:10px;color:#66766c;gap:7px}
+.map-search-input input{border:0!important;min-width:0;width:100%;padding-left:0!important;background:transparent}
+.map-checkbox{display:flex;align-items:flex-start;gap:8px;font-size:11px;color:#65746b;line-height:1.55}.map-checkbox input{margin-top:3px;accent-color:#087b53;flex:none;width:15px!important;min-width:15px!important;height:15px!important;padding:0!important}.map-checkbox span{min-width:0;flex:1}
+.map-results{display:grid;gap:8px}.map-results>small{font-size:10px;color:#65746b}
+.map-result{text-align:left;border:1px solid #dce5de;border-radius:6px;padding:11px;background:#f7f9f5;display:grid;gap:5px;line-height:1.45;overflow-wrap:anywhere}.map-result:hover{border-color:#087b53;background:#edf4ed}
+.map-result strong{font-size:12px;color:#294232}.map-result span,.map-result small{font-size:10px;color:#63746a}.map-result small{color:#087b53}
+.map-manual summary{cursor:pointer;color:#345d44;font-size:12px;padding:7px 0}.map-manual form{padding-top:10px}
+.map-site-record{display:grid;gap:7px;padding:13px;border-radius:6px;background:#eef3eb;overflow-wrap:anywhere}.map-site-record .eyebrow{font-size:9px}.map-site-record strong{font-size:12px;line-height:1.5}.map-site-record span,.map-site-record small{font-size:10px;color:#637369;line-height:1.5}
+.map-editor-column{min-width:0}.map-toolbar{display:flex;align-items:center;justify-content:space-between;gap:7px;flex-wrap:wrap;background:#fff;border:1px solid #dce3dc;border-bottom:0;border-radius:8px 8px 0 0;padding:10px}
+.map-tools{display:flex;gap:5px;flex-wrap:wrap}.map-tools .button{font-size:11px;padding:8px 10px;min-height:34px}
+.map-tool-active{background:#e7f1e8;color:#176644;border:1px solid #98bba1}
+.map-stage{position:relative;min-height:470px;background:#e8ece5;border:1px solid #dce3dc;overflow:hidden}
+.site-map{width:100%;height:470px;text-align:left}.site-map canvas{outline-offset:-4px}.site-map .maplibregl-ctrl-attrib{max-width:min(420px,90%);font-size:10px;line-height:16px;background:#ffffffea}.site-map .maplibregl-ctrl-attrib a{color:#35493e}
+.map-enable{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:34px;text-align:center;background:#edf1e9}
+.map-enable>svg{color:#65816c;margin-bottom:12px}.map-enable h3{font-size:24px;letter-spacing:-.7px;color:#2a4634;margin:4px 0 12px}.map-enable p{max-width:420px;font-size:13px;line-height:1.7;color:#617166;margin:0 0 23px}.map-enable small{font-size:10px;line-height:1.6;color:#5c6e60;margin-top:16px}
+.map-layer-switch{position:absolute;top:12px;left:12px;display:flex;padding:3px;background:#ffffffed;border:1px solid #d4dcd3;border-radius:6px;box-shadow:0 2px 6px #233e2920;max-width:calc(100% - 65px)}
+.map-layer-switch button{font-size:10px;padding:7px 10px;border:0;border-radius:3px;color:#596c60;background:none}.map-layer-switch button.active{background:#2a4e37;color:#fff}.map-layer-switch button:disabled{opacity:.55;cursor:not-allowed}
+.map-status{position:absolute;bottom:50px;left:12px;right:12px;background:#fff5e6eF;border:1px solid #d4ad70;border-radius:5px;padding:9px 11px;font-size:11px;line-height:1.5;color:#71572e}
+.map-instruction{display:flex;gap:8px;align-items:flex-start;padding:11px 14px;background:#f7f9f4;border:1px solid #dce3dc;border-top:0;font-size:11px;color:#5b7061;line-height:1.6;border-radius:0 0 8px 8px}.map-instruction>svg{flex:none;margin-top:1px}
+.map-properties{margin-top:16px}.map-properties .content-body{padding:17px}.map-properties-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr);gap:14px;align-items:end}.map-property-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center;min-height:38px}
+.map-selection-controls{margin-top:16px;padding-top:15px;border-top:1px solid #e7ebe4}.map-roof-summary{display:grid;gap:4px;align-self:center}.map-roof-summary strong{font-size:12px;color:#36533e}.map-roof-summary small{font-size:10px;color:#5c6e60;line-height:1.5}
+.map-properties .field-note{margin-top:12px}.map-editor-column .design-stats{margin-top:16px}
+@media(min-width:1600px){.site-map{height:570px}.map-stage{min-height:570px}}
+@media(max-width:1250px){.map-layout{grid-template-columns:230px minmax(0,1fr)}.map-properties-grid{grid-template-columns:1fr 1fr}.map-property-actions,.map-roof-summary{grid-column:1/-1}.map-selection-controls>.button{grid-column:1/-1}.map-toolbar .tool-group{margin-left:auto}}
+@media(max-width:900px){.map-layout{grid-template-columns:1fr}.map-location-panel .content-body{display:grid;grid-template-columns:1fr 1fr;gap:15px}.map-results,.map-location-panel .inline-error{grid-column:1/-1}.map-location-panel .content-body>.field-note{grid-column:1/-1}.site-map{height:480px}.map-stage{min-height:480px}}
+@media(max-width:540px){.map-location-panel .content-body{display:flex;flex-direction:column}.map-properties-grid{grid-template-columns:1fr}.map-property-actions,.map-roof-summary,.map-selection-controls>.button{grid-column:auto}.map-enable{padding:22px}.map-enable h3{font-size:22px}.map-enable p{font-size:12px}.map-tools .button{font-size:10px;padding:7px 8px}.map-toolbar{gap:8px}.map-layer-switch button{font-size:9px;padding:6px 7px}.map-instruction{font-size:10px}.site-map{height:430px}.map-stage{min-height:430px}}

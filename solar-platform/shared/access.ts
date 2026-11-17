@@ -1,0 +1,10 @@
+import {z} from "zod";
+export const roleSchema=z.enum(["admin","designer","estimator","reviewer","read-only"]);
+export type Role=z.infer<typeof roleSchema>;
+export type Identity={id:string;email:string;name:string;orgId:string;orgName:string;role:Role};
+export type SessionInfo={mode:"preview"|"accounts";identity:Identity|null;setupAvailable:boolean};
+export const credentialsSchema=z.object({email:z.string().trim().email().max(254).transform(s=>s.toLowerCase()),password:z.string().min(14).max(128)});
+export const setupSchema=credentialsSchema.extend({name:z.string().trim().min(2).max(100),organisation:z.string().trim().min(2).max(100),setupToken:z.string().min(32).max(256)});
+export const joinSchema=credentialsSchema.extend({name:z.string().trim().min(2).max(100),token:z.string().min(32).max(128)});
+export const canDesign=(role?:Role)=>!role||role==="admin"||role==="designer";
+export const canQuote=(role?:Role)=>canDesign(role)||role==="estimator";
