@@ -1,0 +1,28 @@
+name: Validate solar platform
+on:
+  push:
+    branches: [main]
+    paths: ['solar-platform/**', '.github/workflows/solar-ci.yml']
+  pull_request:
+    paths: ['solar-platform/**', '.github/workflows/solar-ci.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: solar-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: solar-platform/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build

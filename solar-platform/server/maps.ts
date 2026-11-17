@@ -1,103 +1,55 @@
 import type {Express} from "express";
 import {z} from "zod";
 import {geoPointSchema,type SearchPlace} from "@shared/map-schema";
-
 class MapError extends Error{constructor(message:string,public status=502){super(message);}}
-const clean=(v:unknown,max=150)=>typeof v==="string"?v.replace(/[\u0000-\u001f<>]/g,"").trim().slice(0,max):"";
-const escape=(s:string)=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
-export function normalisePlaces(value:unknown):SearchPlace[]{
-  const rows=(value as {features?:unknown[]})?.features;
-  if(!Array.isArray(rows))throw new MapError("Address provider returned an invalid response.");
-  return rows.slice(0,20).flatMap((row:any,i)=>{
-    const p=row?.properties,g=row?.geometry,coords=g?.coordinates;
-    if(!p||g?.type!=="Point"||!Array.isArray(coords)||clean(p.countrycode,2).toUpperCase()!=="GB")return [];
-    const point=geoPointSchema.safeParse({lng:coords[0],lat:coords[1]});if(!point.success)return [];
-    const street=[clean(p.housenumber,20),clean(p.street,100)].filter(Boolean).join(" ");
-    const parts=[clean(p.name,100),street,clean(p.city||p.town||p.village,80),clean(p.postcode,16),clean(p.state,50)].filter(Boolean);
-    const label=Array.from(new Set(parts)).join(", ").slice(0,240);if(!label)return [];
-    return [{id:`${clean(String(p.osm_id||i),40)}-${i}`,label,...point.data,postcode:clean(p.postcode,16),precision:clean(p.osm_value||p.type||"Place / approximate",60),attribution:"Address search: Photon / © OpenStreetMap contributors"}];
+export async function limitedBody(r:globalThis.Response,max:number){
+  if(!r.ok||!r.body)throw new MapError("Google service unavailable.");
+  const reader=r.body.getReader(),parts:Uint8Array[]=[];let size=0;
+  try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max)throw new MapError("Provider response exceeded its safe size limit.");parts.push(value);}}finally{await reader.cancel().catch(()=>{});}return Buffer.concat(parts);
+}
+const clean=(s:string,max=240)=>s.replace(/[\u0000-\u001f<>]/g,"").trim().slice(0,max);
+const component=z.object({long_name:z.string(),short_name:z.string(),types:z.array(z.string())});
+const result=z.object({place_id:z.string(),formatted_address:z.string(),address_components:z.array(component),geometry:z.object({location:geoPointSchema,location_type:z.string()})});
+export function normalisePlaces(input:unknown):SearchPlace[]{
+  const d=z.object({status:z.string(),results:z.array(z.unknown()).optional()}).safeParse(input);
+  if(!d.success)throw new MapError("Google returned an invalid response.");
+  if(d.data.status==="ZERO_RESULTS")return [];
+  if(d.data.status!=="OK")throw new MapError("Google geocoding failed. Check billing, restrictions and quota.",d.data.status==="OVER_QUERY_LIMIT"?429:502);
+  if(!d.data.results)throw new MapError("Google returned an invalid response.");
+  return d.data.results.slice(0,20).flatMap(row=>{const p=result.safeParse(row);if(!p.success)return [];const r=p.data;
+    if(!r.address_components.some(c=>c.types.includes("country")&&c.short_name==="GB"))return [];
+    const label=clean(r.formatted_address);if(!label)return [];
+    return [{id:clean(r.place_id,200),label,...r.geometry.location,postcode:clean(r.address_components.find(c=>c.types.includes("postal_code"))?.long_name||"",16),precision:clean(r.geometry.location_type,60),attribution:"Google Maps"}];
   }).slice(0,5);
 }
-export async function limitedBody(response:globalThis.Response,max:number){
-  if(!response.ok||!response.body)throw new MapError("Map provider is unavailable. Try again later or use manual coordinates.");
-  const reader=response.body.getReader(),parts:Uint8Array[]=[];let size=0;
-  try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max)throw new MapError("Map provider response exceeded its safe size limit.");parts.push(value);}}
-  finally{await reader.cancel().catch(()=>{});}
-  return Buffer.concat(parts);
-}
-function httpsConfig(raw:string){
-  const u=new URL(raw);
-  if(u.protocol!=="https:"||u.username||u.password||u.hash)throw Error("Map provider URLs must use HTTPS without embedded credentials or fragments.");
-  return u;
-}
+const n=z.number().finite().nonnegative();
+export const buildingSchema=z.object({name:z.string().max(300),center:z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180)}),imageryQuality:z.string().max(30),imageryDate:z.object({year:z.number().int(),month:z.number().int().min(1).max(12).optional(),day:z.number().int().min(1).max(31).optional()}).optional(),solarPotential:z.object({maxArrayPanelsCount:n.int().optional(),maxArrayAreaMeters2:n.optional(),maxSunshineHoursPerYear:n.optional(),panelCapacityWatts:n.optional(),roofSegmentStats:z.array(z.object({pitchDegrees:n.max(90),azimuthDegrees:n.max(360),stats:z.object({areaMeters2:n.optional()}).optional()})).max(1000).optional()})});
 export function registerMaps(app:Express){
-  const endpoint=httpsConfig(process.env.PHOTON_URL||"https://photon.komoot.io/api/");
-  const style=httpsConfig(process.env.MAP_STYLE_URL||"https://tiles.openfreemap.org/styles/liberty").href;
-  const enabled=process.env.MAPS_ENABLED!=="false",searchEnabled=enabled&&process.env.ADDRESS_SEARCH_ENABLED!=="false";
-  const cache=new Map<string,{until:number;places:SearchPlace[]}>(),visitors=new Map<string,{until:number;count:number}>();
-  let nextSearch=0;
-  const satelliteKey=process.env.MAPTILER_API_KEY||"";
-  type Sat={until:number;minzoom:number;maxzoom:number;tileSize:number;attribution:string;template:string};
-  let sat:Sat|undefined,satPending:Promise<Sat>|undefined;
-  const request=(url:URL|string)=>fetch(url,{signal:AbortSignal.timeout(9000),redirect:"error",headers:{"User-Agent":"SolarWorkspace/0.7 (UK self-hosted design; manual lookup)","Accept":"application/json,image/*"}});
-  async function satellite(){
-    if(!satelliteKey||!enabled)throw new MapError("Satellite imagery is not configured. Street maps remain available.",503);
-    if(sat&&sat.until>Date.now())return sat;
-    if(satPending)return satPending;
-    satPending=(async()=>{
-      const url=new URL("https://api.maptiler.com/tiles/satellite-v4/tiles.json");url.searchParams.set("key",satelliteKey);
-      const data=JSON.parse((await limitedBody(await request(url),150000)).toString());
-      const template=typeof data.tiles?.[0]==="string"?data.tiles[0]:"";
-      const check=new URL(template);
-      if(check.protocol!=="https:"||check.hostname!=="api.maptiler.com"||check.username||check.password||!check.pathname.startsWith("/tiles/satellite-v4/")||!template.includes("{z}")||!template.includes("{x}")||!template.includes("{y}"))throw new MapError("Satellite metadata has an unsupported tile template.");
-      const minzoom=z.number().int().min(0).max(22).parse(data.minzoom),maxzoom=z.number().int().min(minzoom).max(22).parse(data.maxzoom);
-      sat={until:Date.now()+3600000,minzoom,maxzoom,tileSize:data.tileSize===512?512:256,attribution:escape(String(data.attribution||"© MapTiler").replace(/<[^>]*>/g,"").slice(0,2000)),template};
-      return sat;
-    })();
-    try{return await satPending;}finally{satPending=undefined;}
+  const on=process.env.MAPS_ENABLED!=="false",browser=process.env.GOOGLE_MAPS_BROWSER_API_KEY||"",geo=process.env.GOOGLE_GEOCODING_API_KEY||"",solar=process.env.GOOGLE_SOLAR_API_KEY||"";
+  const searchEnabled=on&&!!geo&&process.env.ADDRESS_SEARCH_ENABLED!=="false",solarEnabled=on&&!!solar;
+  const counters=new Map<string,{until:number;count:number}>();
+  function limit(key:string,max:number){const now=Date.now();for(const [k,v] of counters)if(v.until<=now)counters.delete(k);const v=counters.get(key)||{until:now+60000,count:0};if(v.count>=max||(!counters.has(key)&&counters.size>=2000))throw new MapError("Google request limit reached. Retry in a minute.",429);v.count++;counters.set(key,v);}
+  async function request(url:URL,key:string,isSolar=false){
+    const r=await fetch(url,{redirect:"error",signal:AbortSignal.timeout(9000),headers:{Accept:"application/json",...(isSolar?{"X-Goog-Api-Key":key}:{})}});
+    if(!r.ok){await r.body?.cancel().catch(()=>{});if(r.status===404&&isSolar)throw new MapError("No Google Solar coverage at this location/quality. Continue manual design or try exact roof coordinates.",404);if(r.status===429)throw new MapError("Google quota exceeded.",429);throw new MapError("Google rejected the request. Check API enablement, billing and key restrictions.");}
+    return JSON.parse((await limitedBody(r,2000000)).toString());
   }
-  const fail=(res:any,e:unknown)=>{
-    // Provider exceptions may contain credential-bearing URLs: never log/return them.
-    res.status(e instanceof MapError?e.status:e instanceof z.ZodError?422:502).json({message:e instanceof MapError?e.message:e instanceof z.ZodError?"Check the map/search inputs and confirm third-party lookup consent.":"Map provider could not complete the request. Use street maps/manual coordinates or retry later."});
-  };
-  function limit(visitor:string,max:number){
-    const now=Date.now();
-    for(const [key,v] of Array.from(visitors))if(v.until<=now)visitors.delete(key);
-    const item=visitors.get(visitor)||{until:now+60000,count:0};
-    if(item.count>=max)throw new MapError("Map request limit reached. Try again in a minute.",429);
-    if(!visitors.has(visitor)&&visitors.size>=1000)throw new MapError("Map service is busy. Try again later.",429);
-    item.count++;visitors.set(visitor,item);
-  }
-  app.get("/api/maps/config",(_req,res)=>res.json({enabled,searchEnabled,styleUrl:style,searchHost:endpoint.hostname,satelliteConfigured:!!satelliteKey&&enabled}));
-  app.post("/api/maps/search",async(req,res)=>{
-    try{
-      if(!searchEnabled)throw new MapError("Address lookup is disabled by the server operator. Use manual coordinates.",503);
-      const {query}=z.object({query:z.string().trim().min(3).max(180).refine(s=>!/[<>\u0000-\u001f]/.test(s)),consent:z.literal(true)}).parse(req.body);
-      limit(`search:${req.identity?.id||req.solarVisitor}`,20);
-      const key=query.toLowerCase().replace(/\s+/g," "),now=Date.now();
-      for(const [k,v] of Array.from(cache))if(v.until<=now)cache.delete(k);
-      const hit=cache.get(key);if(hit)return res.json({places:hit.places,cached:true});
-      if(now<nextSearch){res.setHeader("Retry-After","2");throw new MapError("Please wait two seconds before another address lookup.",429);}
-      nextSearch=now+1200;
-      const url=new URL(endpoint);url.searchParams.set("q",query);url.searchParams.set("limit","5");url.searchParams.set("lang","en");url.searchParams.set("countrycode","GB");url.searchParams.set("bbox","-9,49,2.5,61.5");
-      const places=normalisePlaces(JSON.parse((await limitedBody(await request(url),256000)).toString()));
-      if(cache.size>=200)cache.delete(cache.keys().next().value!);
-      cache.set(key,{until:now+15*60000,places});res.json({places,cached:false});
-    }catch(e){fail(res,e);}
-  });
-  app.get("/api/maps/satellite",async(req,res)=>{
-    try{limit(`sat-meta:${req.identity?.id||req.solarVisitor}`,20);const {minzoom,maxzoom,tileSize,attribution}=await satellite();res.json({minzoom,maxzoom,tileSize,attribution});}catch(e){fail(res,e);}
-  });
-  app.get("/api/maps/satellite/:z/:x/:y",async(req,res)=>{
-    try{
-      limit(`sat-tile:${req.identity?.id||req.solarVisitor}`,400);
-      const b=z.object({z:z.coerce.number().int().min(0).max(22),x:z.coerce.number().int().min(0),y:z.coerce.number().int().min(0)}).parse(req.params);
-      if(b.x>=2**b.z||b.y>=2**b.z)throw new MapError("Tile coordinates are out of bounds.",422);
-      const meta=await satellite();if(b.z<meta.minzoom||b.z>meta.maxzoom)throw new MapError("Tile zoom is unavailable.",422);
-      const url=new URL(meta.template.replace("{z}",String(b.z)).replace("{x}",String(b.x)).replace("{y}",String(b.y)));url.searchParams.set("key",satelliteKey);
-      const upstream=await request(url),mime=upstream.headers.get("content-type")?.split(";")[0];
-      if(!["image/jpeg","image/png","image/webp"].includes(mime||""))throw new MapError("Satellite provider returned no usable image.");
-      const bytes=await limitedBody(upstream,2000000);res.type(mime!).send(bytes);
-    }catch(e){fail(res,e);}
-  });
+  const fail=(res:any,e:unknown)=>{if(e instanceof MapError&&e.status===429)res.setHeader("Retry-After","60");res.status(e instanceof MapError?e.status:e instanceof z.ZodError?422:502).json({message:e instanceof MapError?e.message:e instanceof z.ZodError?"Check inputs and confirm consent.":"Google request failed. Check configuration or retry later."});};
+  app.get("/api/maps/config",(_req,res)=>{res.setHeader("Cache-Control","private, no-store");res.json({provider:"google",enabled:on&&!!browser,browserKey:on?browser:"",searchEnabled,solarEnabled,satelliteConfigured:on&&!!browser});});
+  app.post("/api/maps/search",async(req,res)=>{try{
+    const {query}=z.object({query:z.string().trim().min(3).max(180).refine(s=>!/[<>\u0000-\u001f]/.test(s)),consent:z.literal(true)}).parse(req.body);
+    if(!searchEnabled)throw new MapError("Google geocoding is not configured. Use manual coordinates.",503);
+    limit(`geo:${req.identity?.id||req.ip||req.solarVisitor}`,20);limit("global:geo",120);
+    const url=new URL("https://maps.googleapis.com/maps/api/geocode/json");url.search=new URLSearchParams({address:query,components:"country:GB",region:"uk",language:"en",key:geo}).toString();
+    res.setHeader("Cache-Control","private, no-store");res.json({places:normalisePlaces(await request(url,geo)),cached:false});
+  }catch(e){fail(res,e);}});
+  app.post("/api/maps/solar/building-insights",async(req,res)=>{try{
+    const b=geoPointSchema.extend({consent:z.literal(true),quality:z.enum(["HIGH","MEDIUM","LOW"]).default("HIGH")}).parse(req.body);
+    if(!solarEnabled)throw new MapError("Google Solar API is not configured.",503);
+    limit(`solar:${req.identity?.id||req.ip||req.solarVisitor}`,10);limit("global:solar",60);
+    const url=new URL("https://solar.googleapis.com/v1/buildingInsights:findClosest");url.search=new URLSearchParams({"location.latitude":String(b.lat),"location.longitude":String(b.lng),requiredQuality:b.quality}).toString();
+    const d=buildingSchema.safeParse(await request(url,solar,true));if(!d.success)throw new MapError("Google Solar returned an invalid building response.");
+    res.setHeader("Cache-Control","private, no-store");res.json({provider:"google",building:d.data});
+  }catch(e){fail(res,e);}});
+  app.get(["/api/maps/satellite","/api/maps/satellite/:z/:x/:y"],(_req,res)=>res.status(410).json({message:"Provider changed to Google Maps. Reload the application."}));
 }

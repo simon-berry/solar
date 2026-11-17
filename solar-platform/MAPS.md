@@ -1,61 +1,53 @@
-# Map design and address lookup
+# Google Maps and Solar API migration
 
-Alpha 0.7 adds an approximate geographic design workspace while preserving the original roof-plane editor and all saved rectangular designs. Maps and traces support preliminary design, not a surveyed site plan, imagery-rights determination or engineering certification.
+This replaces the Photon/OpenFreeMap/MapTiler instructions in older release documents. Google Maps JavaScript API renders streets/satellite; Geocoding API handles submitted UK searches; Solar API Building Insights provides explicit assessments. Solar API is not a general map renderer. Data Layers/GeoTIFF overlays and automatic Google layout import are not implemented.
 
-## Working through a site
+## Credentials and deployment
 
-- **Enable the map**: open a project, choose Map design and explicitly enable third-party maps. The default sourced street style comes from OpenFreeMap using MapLibre, with its attribution visible ([OpenFreeMap integration guide](https://openfreemap.org/quick_start/)).
-- **Find an address**: enter an address, postcode or named place, consent to sending only that text to the displayed provider and press Search UK locations. Choose a named result to focus the map and, for a designer, update the project pin. The optional checkbox also applies the result's address/postcode; it is off by default.
-- **Set coordinates**: expand manual coordinates and enter latitude/longitude, or return to the saved site pin. The supported working extent is longitude −9 to 2.5 and latitude 49 to 61.5; this is a UI/data bound, not a jurisdiction check.
-- **Trace a roof**: select Trace roof, choose a new face or an empty unmapped face and set an assumed pitch. Start along the upper/ridge edge and proceed clockwise with the downslope direction on the right of the first edge. Click 3–32 vertices, do not repeat the first point, then Finish roof. Undo vertex and Cancel are available.
-- **Check assumptions**: 0° treats the outline as a plan plane; non-zero pitch converts horizontal downslope distances to roof-plane lengths. Dimensions and azimuth are estimates derived from the chosen points and pitch, not measured or independently inferred.
-- **Design the array**: choose a mapped face, orientation and clearance. Place module/obstruction centres by clicking the map, or auto-fill the actual polygon. Select a drawn object or use the Selection dropdown, move to a new centre, enter roof-plane coordinates, rotate or remove. Replacing existing modules via auto-fill needs a second explicit click; check stale string assignments afterward.
-- **Save and export**: Save revision retains the pin, polygon, georeference and modules. Documents exports GeoJSON of mapped roofs/modules/obstructions/site pin, plus roof-plane SVG/DXF and frozen preliminary A3 technical packs. None includes map imagery.
+Enable billing and Maps JavaScript API, Geocoding API and Solar API in Google Cloud. Create separate credentials:
 
-Pan/zoom and search are available to viewing roles, but only designer/admin roles can change saved design data. Old roofs are not silently moved to a searched address; changing the site pin never translates an existing drawing. Unmapped roofs remain fully available in Roof design.
+- GOOGLE_MAPS_BROWSER_API_KEY: restrict to authorised website referrers and Maps JavaScript API. This key is intentionally public in configuration/browser requests.
+- GOOGLE_GEOCODING_API_KEY: private server key, restricted to server egress IP and Geocoding API.
+- GOOGLE_SOLAR_API_KEY: private server key, restricted to server egress IP and Solar API.
 
-## Geometry and compatibility
+Set Cloud quotas and billing alerts. Per-process application limits are not a distributed billing ceiling; budget alerts are not spending caps. Verify Google coverage, attribution, privacy and content-storage/derivation/export rights for your use case. Manual confirmation is not a licence exemption.
 
-`design.mapLocation`, `roof.boundary` and `roof.geo` are optional/nullable JSON fields. They have no defaults in legacy designs; no database column migration or rewrite is needed. Saves from an older client preserve omitted fields by roof ID; explicit null clears them, whereas restoring a historical revision restores its exact historical geometry.
+Compose requires version 2.24.0+. From solar-platform:
 
-Mapping uses a spherical small-area approximation about a local origin and a first-edge bearing. Dimensions are limited to 2–80 m width and 2–60 m on-slope length per face, with ten faces and existing 150-module/50-kWp design caps. Large or complex buildings must be split and externally verified; this is not a projected CRS or a measured 3D roof reconstruction.
+```sh
+umask 077
+cp google.env.example .env.google
+chmod 600 .env.google
+# Edit .env.google privately and insert restricted keys.
+bash script/self-host.sh check
+bash script/self-host.sh up
+```
 
-Placement checks require complete rectangular modules inside the simple roof polygon and the requested distance from every boundary segment. Concave notches cannot be bridged merely because four corners fit. Module spacing and obstruction checks still apply; imported mounting rails and points outside the polygon are findings. No fire-access, wind-zone, structural or regulatory setback is selected automatically.
+Keep existing domain/bootstrap settings in .env.selfhost. Its strict parser intentionally does not accept Google keys: Compose reads .env.google separately, relative to compose.yaml, not SOLAR_CONFIG_DIRECTORY. Existing .gitignore/.dockerignore exclude .env.*. Protect host/Docker administrator access; container environment is inspectable. Never commit or paste credentials into chat, tickets or logs.
 
-Changing mapped width/height/pitch/azimuth outside the mapped UI produces a stale-map error. Roof design locks those inputs until the map reference is explicitly unlinked; the polygon/modules remain when unlinked. A separate, confirmed conversion removes the polygon/reference and uses rectangular bounds; undo restores it. Added cloned roofs do not inherit a location.
+Native Node uses the supervisor environment or protected .env in its working directory. Native flags MAPS_ENABLED=false and ADDRESS_SEARCH_ENABLED=false disable maps/all lookups and geocoding respectively; Compose/helper flags are SOLAR_MAPS_ENABLED and SOLAR_ADDRESS_SEARCH_ENABLED. Missing keys disable the respective control without preventing server startup. Old provider URL/MapTiler settings are no longer used by Compose/application mapping. Rebuild/restart for code changes and recreate containers for credential changes. Back up the database before rollout. This commit does not deploy a server or configure Cloud credentials.
 
-Engineering bindings include roof polygon/reference data and a present site pin. Old designs without those fields retain the original engineering hash envelope, and pricing-only edits remain independent. Mapped technical issues use `technical-review-v2`; old v1 issue snapshots/templates are not rewritten. All packs remain not for installation.
+## Workspace behaviour
 
-## Providers, privacy and operations
+Maps load only after explicit enablement; Google receives client IP and viewed areas. Submitted address search requires separate consent and is not autocomplete. Search results remain transient and do not replace project addresses. A user can explicitly confirm a site pin only after checking storage rights. Changing a pin never translates existing roofs.
 
-Keep the 0.7+ backend when supporting older client bundles: preservation of omitted map fields is implemented there. Older server releases cannot interpret these extensions and can strip them on save; take and verify a runtime backup before any server rollback, and do not edit mapped projects using a pre-0.7 server.
+Roof tracing uses 3-32 vertices: upper/ridge edge first, clockwise with downslope to the right; do not repeat the first point. Pitch/direction are assumptions. Existing module placement/move/rotate/remove, obstructions, polygon auto-fill, clearance and undo/redo remain available. Replacing modules requires confirmation; verify string assignments afterward. Saved schema and shared geometry algorithms are unchanged, including legacy photon records, revisions, exports and stale-reference detection. View-only roles cannot mutate designs. Limits remain ten roofs, 150 modules/50 kWp and 30 obstructions/roof within the UK working extent, not a jurisdiction check.
 
-The default address service is the public Photon pilot; its documentation permits reasonable usage, may throttle/ban abusive use, and offers no availability guarantee ([Photon service documentation](https://github.com/komoot/photon)). For a multi-user production deployment, operate a suitable Photon instance or arrange a service with explicit capacity and privacy terms.
+Solar lookup is an explicit, separately consented, billable buildingInsights:findClosest request. HIGH is the default minimum imagery quality; MEDIUM/LOW must be chosen manually. Verify the returned centre is the intended roof: the closest known building can differ from your pin. No coverage is a normal outcome. Imagery quality/date, model panel rating, maximum panel count/area, sunshine-equivalent hours and segment pitch/azimuth/area are estimates. Sunshine hours are not kWh and model panels are not your selected catalogue modules. Responses are transient, cleared on coordinate/quality changes, never imported into geometry or energy forecasts, and not saved/exported. Satellite display is Google Maps imagery, not Solar RGB data. No imagery is included in exports. Verify dimensions, rights and installation engineering externally.
 
-Search is never autocomplete. The backend requires `consent: true`, a 3–180-character manually submitted query, and UK country/bounding-box constraints. It normalises at most five result records, restricts streamed responses to 256 kB, aborts after nine seconds, refuses redirects, rate-limits actors to 20 calls/minute, permits at most one uncached upstream request every 1.2 seconds per running process, and holds at most 200 successful queries for 15 minutes in RAM.
+## Operations and verification
 
-Query text is not added to application access logs or audit events. The RAM cache contains query text; the chosen location/label is intentionally saved in project revisions/exports if a designer selects it. Operators and external providers may process IPs, viewed areas and their own access logs; this feature does not claim to implement retention/consent governance for an installer.
+Routes inherit existing account/tenant/origin middleware. Consent/input checks precede upstream calls. Fixed hosts, no redirects, nine-second timeouts, 2 MB streamed limits, validated responses, no provider/query cache and private/no-store responses are used. Raw upstream errors/credential-bearing URLs are not returned or logged. Limits per actor/minute: geocoding 20, Solar 10; per process: 120 and 60. Old satellite proxy endpoints return HTTP 410; reload cached clients.
 
-Public Nominatim is not used, and the app does not use the referer-sensitive public OSM raster tile endpoint or borrow unauthorised commercial imagery. Provider availability and map accuracy remain external dependencies.
+HTTP 503 means disabled/missing credentials; 404 from Solar means no coverage; 429 means local/provider quota; 502 means network, invalid response or Cloud billing/API/key restriction errors. Use manual design where coverage is absent. Do not add automatic paid retries.
 
-## Self-hosted configuration
+```sh
+npm ci
+npm run check
+npm test
+npm run build
+```
 
-| Native environment | Compose/helper configuration | Default |
-|---|---|---|
-| `MAPS_ENABLED` | `SOLAR_MAPS_ENABLED` | `true` |
-| `ADDRESS_SEARCH_ENABLED` | `SOLAR_ADDRESS_SEARCH_ENABLED` | `true` |
-| `MAP_STYLE_URL` | `SOLAR_MAP_STYLE_URL` | `https://tiles.openfreemap.org/styles/liberty` |
-| `PHOTON_URL` | `SOLAR_PHOTON_URL` | `https://photon.komoot.io/api/` |
-| `MAPTILER_API_KEY` | `SOLAR_MAPTILER_API_KEY` | unset, satellite disabled |
+CI runs these commands after a push to main; it is not a deployment workflow. Full checks/build and live Google authorisation have not been verified in the assistant sandbox. The test suite retains eleven geometry/compatibility scenarios and mocks provider requests. Before production, verify CI, authorised browser load, UK search, satellite switching, trace/object selection, read-only roles, legacy save/reload/export and explicit Solar/no-coverage handling using licensed keys. Do not call this a verified release until those checks pass.
 
-For native deployment, set variables privately in the process supervisor. For the Linux helper, optional `SOLAR_*` rows can be added to the existing protected `.env.selfhost`; retain its 0600 permissions and existing Compose identity. Run `bash script/self-host.sh check`, then `bash script/self-host.sh up` to apply. Never paste credentials into chat, source control, a browser query box or public files.
-
-Provider URLs must use HTTPS without embedded username/password or fragments; style URLs are intentionally public browser configuration. A custom style is responsible for its own sourced geography, compatible glyph/sprite/tile URLs, CORS and attribution. To be fully offline, self-host every map dependency and Photon; changing the main style URL alone does not remove that style's external URLs. Disabling maps/search makes those application functions unavailable without removing saved geometry.
-
-## Optional satellite layer
-
-The app includes an opt-in MapTiler satellite-v4 adapter using the operator's own authorised key and licence. MapTiler documents both the required API key and the TileJSON metadata endpoint; metadata supplies supported zooms and credits rather than this app inventing coverage or resolution ([MapTiler Tiles API](https://docs.maptiler.com/cloud/api/tiles/)).
-
-The key stays server-side. Scoped/authenticated routes proxy bounded metadata/raster requests only to the fixed provider, validate integer XYZ bounds and raster MIME types, and do not return or log credential-bearing upstream exceptions. The app retains provider credits and does not provide bulk imagery download or imagery in exported plans.
-
-No live licensed satellite key was available during this release's verification. The no-key disabled state and mocked adapter paths can be tested, but real aerial coverage, zoom quality, provider restrictions, billing, proxy permissions and attribution requirements must be verified against the operator's plan before enabling it. Server-side proxying is not a licence exemption or proof of high-resolution roof imagery.
+Official documentation: https://developers.google.com/maps/documentation/solar/building-insights ; https://developers.google.com/maps/documentation/javascript/get-api-key ; https://developers.google.com/maps/documentation/geocoding/policies ; https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/

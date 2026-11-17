@@ -5,6 +5,10 @@ services:
     init: true
     ports:
       - "127.0.0.1:${SOLAR_HOST_PORT:-5000}:5000"
+    # Compose 2.24.0+: credentials stay outside Git and the image.
+    env_file:
+      - path: ./.env.google
+        required: false
     environment:
       AUTH_MODE: accounts
       PUBLIC_ORIGIN: ${SOLAR_PUBLIC_ORIGIN:?Set SOLAR_PUBLIC_ORIGIN to your HTTPS origin}
@@ -12,9 +16,6 @@ services:
       DATABASE_PATH: /app/data/solar.db
       MAPS_ENABLED: ${SOLAR_MAPS_ENABLED:-true}
       ADDRESS_SEARCH_ENABLED: ${SOLAR_ADDRESS_SEARCH_ENABLED:-true}
-      MAP_STYLE_URL: ${SOLAR_MAP_STYLE_URL:-https://tiles.openfreemap.org/styles/liberty}
-      PHOTON_URL: ${SOLAR_PHOTON_URL:-https://photon.komoot.io/api/}
-      MAPTILER_API_KEY: ${SOLAR_MAPTILER_API_KEY:-}
     volumes:
       - solar-data:/app/data
     security_opt:
